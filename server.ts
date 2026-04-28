@@ -7,6 +7,7 @@ import Stripe from "stripe";
 import { initializeApp } from 'firebase/app';
 import { getFirestore, doc, getDoc, updateDoc, increment, serverTimestamp } from 'firebase/firestore';
 import firebaseConfig from './firebase-applet-config.json';
+import { GoogleGenAI, Type } from "@google/genai";
 
 const app = express();
 const PORT = 3000;
@@ -14,6 +15,19 @@ const PORT = 3000;
 // Initialize Firebase on server
 const firebaseApp = initializeApp(firebaseConfig);
 const db = getFirestore(firebaseApp, firebaseConfig.firestoreDatabaseId);
+
+// Lazy Gemini init
+let genAI: GoogleGenAI | null = null;
+function getAI() {
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) {
+    throw new Error("GEMINI_API_KEY environment variable is required");
+  }
+  if (!genAI) {
+    genAI = new GoogleGenAI({ apiKey });
+  }
+  return genAI;
+}
 
 // Lazy Stripe init
 let stripeClient: Stripe | null = null;
@@ -58,6 +72,104 @@ app.use(express.json());
 let serverBalance = 20.00;
 
 // --- API ROUTES ---
+
+app.post("/api/ai/analyze", async (req, res) => {
+  try {
+    const { symbol, currentPrice } = req.body;
+    const ai = getAI();
+    const response = await ai.models.generateContent({
+      model: "gemini-3-flash-preview",
+      contents: `Perform a detailed technical and sentiment analysis for the stock symbol: ${symbol}. 
+                 The current price is $${currentPrice}. 
+                 The user is a beginner starting with a $20 budget. 
+                 Provide a clear BUY, SELL, or HOLD recommendation.
+                 Include reasoning, entry/exit/stop-loss targets, and overall sentiment.
+                 Format the response as a JSON object matching the AIAnalysis interface.`,
+      config: {
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            recommendation: { type: Type.STRING, enum: ["BUY", "SELL", "HOLD"] },
+            confidence: { type: Type.NUMBER },
+            reasoning: { type: Type.STRING },
+            sentiment: { type: Type.STRING },
+            targets: {
+              type: Type.OBJECT,
+              properties: {
+                entry: { type: Type.NUMBER },
+                exit: { type: Type.NUMBER },
+                stopLoss: { type: Type.NUMBER }
+              },
+              required: ["entry", "exit", "stopLoss"]
+            }
+          },
+          required: ["recommendation", "confidence", "reasoning", "sentiment", "targets"]
+        }
+      }
+    });
+
+    const text = response.text;
+    res.json(JSON.parse(text || "{}"));
+  } catch (err: any) {
+    console.error("AI Analyze Error:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post("/api/ai/news", async (req, res) => {
+  try {
+    const { symbol } = req.body;
+    const ai = getAI();
+    const response = await ai.models.generateContent({
+      model: "gemini-3-flash-preview",
+      contents: `Search for the latest, most relevant news articles for stock symbol: ${symbol}. 
+                 Provide a list of 5 news items including title, a short summary (1 sentence), the source name, and a relative timestamp (e.g., '2 hours ago').`,
+      config: {
+        tools: [{ googleSearch: {} }],
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: Type.ARRAY,
+          items: {
+            type: Type.OBJECT,
+            properties: {
+              title: { type: Type.STRING },
+              url: { type: Type.STRING },
+              source: { type: Type.STRING },
+              summary: { type: Type.STRING },
+              publishedAt: { type: Type.STRING }
+            },
+            required: ["title", "source", "summary", "publishedAt"]
+          }
+        }
+      }
+    });
+    res.json(JSON.parse(response.text || "[]"));
+  } catch (err: any) {
+    console.error("AI News Error:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post("/api/ai/greeting", async (req, res) => {
+  try {
+    const { userName, portfolioSummary, marketStatus } = req.body;
+    const ai = getAI();
+    const response = await ai.models.generateContent({
+      model: "gemini-3-flash-preview",
+      contents: `You are Aria, a friendly and professional personal stock assistant. 
+                 Welcome ${userName} back to the trading floor.
+                 Briefly summarize their day: ${portfolioSummary}.
+                 Mention the current market mood: ${marketStatus}.
+                 Keep it concise, supportive, and natural (personable).
+                 Do not use markdown, just plain text suitable for text-to-speech.`,
+    });
+    res.json({ text: response.text });
+  } catch (err: any) {
+    console.error("AI Greeting Error:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
 
 app.post("/api/funds/create-checkout-session", async (req, res) => {
   const { amount, userId } = req.body;
