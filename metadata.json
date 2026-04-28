@@ -1,0 +1,6 @@
+{
+  "name": "Stock Pilot",
+  "description": "An AI-powered stock assistant to track your $20 portfolio, get buy/sell signals, and find the best trading platforms.",
+  "requestFramePermissions": [],
+  "majorCapabilities": []
+}

@@ -1,0 +1,74 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 0. Default Deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // --- Helpers ---
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return request.auth.uid == userId;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    // --- Validation Helpers ---
+    function isValidUser(data) {
+      return data.keys().hasAll(['balance', 'updatedAt']) 
+        && data.balance is number 
+        && data.balance >= 0
+        && data.updatedAt == request.time;
+    }
+
+    function isValidPortfolioItem(data) {
+      return data.keys().hasAll(['symbol', 'shares', 'averagePrice', 'updatedAt'])
+        && data.symbol is string && data.symbol.size() <= 10
+        && data.shares is number && data.shares >= 0
+        && data.averagePrice is number && data.averagePrice >= 0
+        && data.updatedAt == request.time;
+    }
+
+    function isValidTrade(data) {
+      return data.keys().hasAll(['symbol', 'type', 'shares', 'price', 'timestamp'])
+        && data.symbol is string && data.symbol.size() <= 10
+        && (data.type == 'BUY' || data.type == 'SELL')
+        && data.shares is number && data.shares > 0
+        && data.price is number && data.price > 0
+        && data.timestamp == request.time;
+    }
+
+    // --- Users ---
+    match /users/{userId} {
+      allow get: if isSignedIn() && isOwner(userId);
+      allow create: if isSignedIn() && isOwner(userId) && isValidUser(request.resource.data);
+      allow update: if isSignedIn() && isOwner(userId) && isValidUser(request.resource.data)
+        && (
+          // Use diff to ensure only expected fields are changed if needed
+          request.resource.data.diff(resource.data).affectedKeys().hasAny(['balance', 'botSettings', 'updatedAt'])
+        );
+
+      // --- Subcollections ---
+      match /portfolio/{symbol} {
+        allow list, get: if isSignedIn() && isOwner(userId);
+        allow create, update: if isSignedIn() && isOwner(userId) 
+          && isValidPortfolioItem(request.resource.data)
+          && isValidId(symbol);
+        allow delete: if isSignedIn() && isOwner(userId);
+      }
+
+      match /trades/{tradeId} {
+        allow list, get: if isSignedIn() && isOwner(userId);
+        allow create: if isSignedIn() && isOwner(userId) 
+          && isValidTrade(request.resource.data)
+          && isValidId(tradeId);
+      }
+    }
+  }
+}

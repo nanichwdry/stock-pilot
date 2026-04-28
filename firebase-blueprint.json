@@ -1,0 +1,64 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "User profile and financial state",
+      "type": "object",
+      "properties": {
+        "balance": { "type": "number", "description": "Available cash balance" },
+        "updatedAt": { "type": "string", "format": "date-time" },
+        "botSettings": {
+          "type": "object",
+          "properties": {
+            "isEnabled": { "type": "boolean" },
+            "safeBalance": { "type": "number" },
+            "maxTradeAmount": { "type": "number" },
+            "riskTolerance": { "type": "string", "enum": ["CONSERVATIVE", "MODERATE", "AGGRESSIVE"] },
+            "isDayTradeMode": { "type": "boolean" }
+          }
+        }
+      },
+      "required": ["balance", "updatedAt"]
+    },
+    "PortfolioItem": {
+      "title": "Portfolio Item",
+      "description": "A stock position held by the user",
+      "type": "object",
+      "properties": {
+        "symbol": { "type": "string" },
+        "shares": { "type": "number" },
+        "averagePrice": { "type": "number" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["symbol", "shares", "averagePrice", "updatedAt"]
+    },
+    "Trade": {
+      "title": "Trade",
+      "description": "A record of an executed trade",
+      "type": "object",
+      "properties": {
+        "symbol": { "type": "string" },
+        "type": { "type": "string", "enum": ["BUY", "SELL"] },
+        "shares": { "type": "number" },
+        "price": { "type": "number" },
+        "timestamp": { "type": "string", "format": "date-time" },
+        "isAutoTrade": { "type": "boolean" }
+      },
+      "required": ["symbol", "type", "shares", "price", "timestamp"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "Individual user data"
+    },
+    "/users/{userId}/portfolio/{symbol}": {
+      "schema": "PortfolioItem",
+      "description": "User stock holdings"
+    },
+    "/users/{userId}/trades/{tradeId}": {
+      "schema": "Trade",
+      "description": "Historical trade logs for the user"
+    }
+  }
+}
