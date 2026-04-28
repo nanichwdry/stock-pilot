@@ -1,10 +1,22 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { AIAnalysis } from "../types";
 
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+let genAI: GoogleGenAI | null = null;
+
+function getAI() {
+  if (!genAI) {
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey) {
+      throw new Error("GEMINI_API_KEY is not set. Please provide it in the environment variables.");
+    }
+    genAI = new GoogleGenAI({ apiKey });
+  }
+  return genAI;
+}
 
 export async function analyzeStock(symbol: string, currentPrice: number): Promise<AIAnalysis> {
   try {
+    const ai = getAI();
     const response = await ai.models.generateContent({
       model: "gemini-3-flash-preview",
       contents: `Perform a detailed technical and sentiment analysis for the stock symbol: ${symbol}. 
@@ -66,6 +78,7 @@ export interface NewsArticle {
 
 export async function getStockNews(symbol: string): Promise<NewsArticle[]> {
   try {
+    const ai = getAI();
     const response = await ai.models.generateContent({
       model: "gemini-3-flash-preview",
       contents: `Search for the latest, most relevant news articles for stock symbol: ${symbol}. 
@@ -101,6 +114,7 @@ export async function getStockNews(symbol: string): Promise<NewsArticle[]> {
 
 export async function getVoiceGreeting(userName: string, portfolioSummary: string, marketStatus: string): Promise<string> {
   try {
+    const ai = getAI();
     const response = await ai.models.generateContent({
       model: "gemini-3-flash-preview",
       contents: `You are Aria, a friendly and professional personal stock assistant. 
@@ -115,3 +129,5 @@ export async function getVoiceGreeting(userName: string, portfolioSummary: strin
     return `Welcome back ${userName}. Your portfolio is looking interesting today. How can I help?`;
   }
 }
+
+
