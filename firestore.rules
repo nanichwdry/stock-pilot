@@ -69,6 +69,13 @@ service cloud.firestore {
           && isValidTrade(request.resource.data)
           && isValidId(tradeId);
       }
+
+      match /history/{snapshotId} {
+        allow list, get: if isSignedIn() && isOwner(userId);
+        allow create: if isSignedIn() && isOwner(userId)
+          && request.resource.data.totalValue is number
+          && request.resource.data.timestamp == request.time;
+      }
     }
   }
 }

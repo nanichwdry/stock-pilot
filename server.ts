@@ -27,12 +27,17 @@ function getStripe() {
 }
 
 app.use(helmet({
+  crossOriginOpenerPolicy: { policy: "same-origin-allow-popups" },
   contentSecurityPolicy: {
     directives: {
       ...helmet.contentSecurityPolicy.getDefaultDirectives(),
-      "img-src": ["'self'", "data:", "https://*"],
-      "script-src": ["'self'", "'unsafe-inline'", "https://cdn.jsdelivr.net"],
-      "connect-src": ["'self'", "https://*", "wss://*"],
+      "img-src": ["'self'", "data:", "https://*", "blob:"],
+      "script-src": ["'self'", "'unsafe-inline'", "'unsafe-eval'", "https://apis.google.com", "https://www.gstatic.com", "https://*.firebaseapp.com", "https://cdn.jsdelivr.net"],
+      "script-src-elem": ["'self'", "'unsafe-inline'", "https://apis.google.com", "https://www.gstatic.com", "https://*.firebaseapp.com", "https://cdn.jsdelivr.net"],
+      "frame-src": ["'self'", "https://*.firebaseapp.com", "https://*.auth.google.com", "https://*.google.com"],
+      "connect-src": ["'self'", "https://*", "wss://*", "ws://localhost:*", "ws://127.0.0.1:*"],
+      "style-src": ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com", "https://cdn.jsdelivr.net"],
+      "font-src": ["'self'", "https://fonts.gstatic.com", "data:"],
     },
   },
 }));

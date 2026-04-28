@@ -82,6 +82,8 @@ export default function App() {
   const [isGreetingPlayed, setIsGreetingPlayed] = useState(false);
   const [news, setNews] = useState<NewsArticle[]>([]);
   const [activeTab, setActiveTab] = useState<'ANALYSIS' | 'NEWS'>('ANALYSIS');
+  const [historyData, setHistoryData] = useState<{timestamp: string, totalValue: number}[]>([]);
+  const [timeframe, setTimeframe] = useState<'1D' | '1W' | '1M' | '1Y'>('1D');
 
   const [alerts, setAlerts] = useState<PriceAlert[]>([]);
   const [notifications, setNotifications] = useState<{id: string, text: string}[]>([]);
@@ -178,10 +180,25 @@ export default function App() {
       setTrades(items);
     }, (err) => handleFirestoreError(err, OperationType.GET, `users/${user.uid}/trades`));
 
+    // Sync History
+    const historyRef = query(collection(db, 'users', user.uid, 'history'), orderBy('timestamp', 'asc'));
+    const unsubHistory = onSnapshot(historyRef, (snap) => {
+      const items: {timestamp: string, totalValue: number}[] = [];
+      snap.forEach(doc => {
+        const data = doc.data();
+        items.push({
+          timestamp: data.timestamp?.toDate?.()?.toISOString() || new Date().toISOString(),
+          totalValue: data.totalValue
+        });
+      });
+      setHistoryData(items);
+    }, (err) => handleFirestoreError(err, OperationType.GET, `users/${user.uid}/history`));
+
     return () => {
       unsubUser();
       unsubPortfolio();
       unsubTrades();
+      unsubHistory();
     };
   }, [user]);
 
@@ -330,6 +347,71 @@ export default function App() {
   };
   const totalValue = balance + totalEquity;
 
+  const PerformanceChart = () => {
+    const filteredData = useMemo(() => {
+      const now = new Date();
+      return historyData.filter(d => {
+        const date = new Date(d.timestamp);
+        if (timeframe === '1D') return now.getTime() - date.getTime() <= 24 * 60 * 60 * 1000;
+        if (timeframe === '1W') return now.getTime() - date.getTime() <= 7 * 24 * 60 * 60 * 1000;
+        if (timeframe === '1M') return now.getTime() - date.getTime() <= 30 * 24 * 60 * 60 * 1000;
+        return true; // 1Y
+      });
+    }, [historyData, timeframe]);
+
+    return (
+      <div className="h-[120px] w-full mt-6">
+        <div className="flex justify-between items-center mb-2">
+          <span className="text-[9px] font-bold text-slate-600 uppercase tracking-widest">Growth Curve</span>
+          <div className="flex gap-1">
+            {(['1D', '1W', '1M', '1Y'] as const).map(tf => (
+              <button
+                key={tf}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setTimeframe(tf);
+                }}
+                className={cn(
+                  "px-1.5 py-0.5 rounded text-[7px] font-black transition-all",
+                  timeframe === tf ? "bg-indigo-600 text-white" : "text-slate-600 hover:text-slate-400"
+                )}
+              >
+                {tf}
+              </button>
+            ))}
+          </div>
+        </div>
+        <ResponsiveContainer width="100%" height="100%">
+          <AreaChart data={filteredData.length > 0 ? filteredData : [{ timestamp: new Date().toISOString(), totalValue: totalValue }]}>
+            <defs>
+              <linearGradient id="colorValue" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="5%" stopColor="#6366f1" stopOpacity={0.3}/>
+                <stop offset="95%" stopColor="#6366f1" stopOpacity={0}/>
+              </linearGradient>
+            </defs>
+            <XAxis dataKey="timestamp" hide />
+            <YAxis hide domain={['auto', 'auto']} />
+            <Tooltip 
+              contentStyle={{ backgroundColor: '#0f172a', border: '1px solid #1e293b', borderRadius: '8px', padding: '4px 8px' }}
+              itemStyle={{ color: '#fff', fontSize: '10px', padding: 0 }}
+              labelStyle={{ display: 'none' }}
+              formatter={(value: number) => [formatCurrency(value), 'Value']}
+            />
+            <Area 
+              type="monotone" 
+              dataKey="totalValue" 
+              stroke="#6366f1" 
+              strokeWidth={2}
+              fillOpacity={1} 
+              fill="url(#colorValue)" 
+              animationDuration={1000}
+            />
+          </AreaChart>
+        </ResponsiveContainer>
+      </div>
+    );
+  };
+
   const handleAnalyze = async (stock: Stock) => {
     setIsAnalyzing(true);
     setIsModalOpen(true);
@@ -347,6 +429,33 @@ export default function App() {
     setNews(newsData);
     setIsAnalyzing(false);
   };
+
+  const recordSnapshot = async (val: number) => {
+    if (!user) return;
+    try {
+      const historyRef = collection(db, 'users', user.uid, 'history');
+      await addDoc(historyRef, {
+        totalValue: val,
+        timestamp: serverTimestamp()
+      });
+    } catch (err) {
+      console.error("Failed to record snapshot:", err);
+    }
+  };
+
+  // Periodically record snapshots (every hour ideally, but let's do it on significant value changes for demo/real use)
+  useEffect(() => {
+    if (!user || totalValue === 0) return;
+    
+    // Logic: Record if last snapshot was > 1 hour ago OR if no snapshots exist
+    const lastSnapshot = historyData[historyData.length - 1];
+    const now = new Date().getTime();
+    const oneHour = 60 * 60 * 1000;
+
+    if (!lastSnapshot || (now - new Date(lastSnapshot.timestamp).getTime() > oneHour)) {
+      recordSnapshot(totalValue);
+    }
+  }, [totalValue, user, historyData]);
 
   const handleBuy = async (stock: Stock, amount: number, isAutoTrade = false) => {
     if (!user || amount > balance) return;
@@ -392,6 +501,9 @@ export default function App() {
         isAutoTrade
       });
 
+      // Update local history for immediate feedback if possible, or force a snapshot
+      recordSnapshot(totalValue); 
+
     } catch (err) {
       console.error("Buy failed:", err);
       handleFirestoreError(err, OperationType.WRITE, `trades`);
@@ -434,6 +546,8 @@ export default function App() {
         timestamp: serverTimestamp(),
         isAutoTrade
       });
+
+      recordSnapshot(totalValue);
 
     } catch (err) {
       console.error("Sell failed:", err);
@@ -504,6 +618,28 @@ export default function App() {
     s.name.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
+  const handleSignIn = async () => {
+    console.log("Starting sign in...");
+    try {
+      const result = await signInWithGoogle();
+      console.log("Sign in successful:", result.user.email);
+    } catch (err: any) {
+      console.error("Sign in failed:", err);
+      let errorMsg = err.message;
+      
+      if (err.code === 'auth/popup-blocked') {
+        errorMsg = "Popup blocked! Please allow popups for this site.";
+      } else if (err.code === 'auth/unauthorized-domain') {
+        errorMsg = "Domain not authorized in Firebase Console. Please add this domain to 'Authorized Domains' in your Firebase Auth settings.";
+      }
+      
+      setNotifications(prev => [{
+        id: Math.random().toString(),
+        text: `⚠️ Sign-in failed: ${errorMsg}`
+      }, ...prev]);
+    }
+  };
+
   if (authLoading) {
     return (
       <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center p-8">
@@ -533,7 +669,7 @@ export default function App() {
              <span className="text-xl font-black text-white tracking-tighter">Stock Pilot <span className="text-slate-500 font-normal">v1.2</span></span>
           </div>
           <button 
-            onClick={signInWithGoogle}
+            onClick={handleSignIn}
             className="group flex items-center gap-2 px-6 py-2.5 bg-white text-black rounded-full text-sm font-bold hover:bg-slate-200 transition-all shadow-xl hover:scale-105"
           >
             Sign In with Google
@@ -558,7 +694,7 @@ export default function App() {
              
              <div className="flex flex-col sm:flex-row gap-4 justify-center">
                <button 
-                 onClick={signInWithGoogle}
+                 onClick={handleSignIn}
                  className="px-10 py-5 bg-gradient-to-r from-indigo-600 to-purple-600 text-white rounded-2xl font-black text-lg shadow-2xl shadow-indigo-600/30 hover:shadow-indigo-600/50 transition-all flex items-center justify-center gap-3 group"
                >
                  <LogIn size={20} />
@@ -701,6 +837,7 @@ export default function App() {
               Transfer Funds
             </button>
           </div>
+          <PerformanceChart />
         </motion.div>
 
         {/* Signal Intelligence Card */}
